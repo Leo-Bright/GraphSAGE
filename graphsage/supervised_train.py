@@ -98,7 +98,7 @@ def incremental_evaluate(sess, model, minibatch_iter, size, test=False):
     finished = False
     while not finished:
         feed_dict_val, batch_labels, finished, _  = minibatch_iter.incremental_node_val_feed_dict(size, iter_num, test=test)
-        node_outs_val = sess.run([model.preds, model.loss], 
+        node_outs_val = sess.run([model.preds, model.loss, model.outputs1],
                          feed_dict=feed_dict_val)
         val_preds.append(node_outs_val[0])
         labels.append(batch_labels)
@@ -118,6 +118,31 @@ def construct_placeholders(num_classes):
         'batch_size' : tf.placeholder(tf.int32, name='batch_size'),
     }
     return placeholders
+
+def save_val_embeddings(sess, model, minibatch_iter, size, out_dir, mod=""):
+    val_embeddings = []
+    finished = False
+    seen = set([])
+    nodes = []
+    iter_num = 0
+    name = "val"
+    while not finished:
+        feed_dict_val, finished, val_nodes = minibatch_iter.incremental_embed_feed_dict(size, iter_num)
+        iter_num += 1
+        outs_val = sess.run([model.outputs1],
+                            feed_dict=feed_dict_val[0])
+        #ONLY SAVE FOR embeds1 because of planetoid
+        for i, val_node in enumerate(val_nodes):
+            if not val_node in seen:
+                val_embeddings.append(outs_val[-1][i,:])
+                nodes.append(val_node)
+                seen.add(val_node)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    val_embeddings = np.vstack(val_embeddings)
+    np.save(out_dir + name + mod + ".npy",  val_embeddings)
+    with open(out_dir + name + mod + ".txt", "w") as fp:
+        fp.write("\n".join(map(str,nodes)))
 
 def train(train_data, test_data=None):
 
@@ -313,6 +338,9 @@ def train(train_data, test_data=None):
     
     print("Optimization Finished!")
     sess.run(val_adj_info.op)
+
+    save_val_embeddings(sess, model, minibatch, FLAGS.validate_batch_size, log_dir())
+
     val_cost, val_f1_mic, val_f1_mac, duration = incremental_evaluate(sess, model, minibatch, FLAGS.batch_size)
     print("Full validation stats:",
                   "loss=", "{:.5f}".format(val_cost),
